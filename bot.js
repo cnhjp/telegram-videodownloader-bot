@@ -1,8 +1,6 @@
 const dotenv = require("dotenv");
 const TelegramBot = require("node-telegram-bot-api");
-const { exec } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+const { spawn } = require("child_process");
 
 dotenv.config();
 
@@ -11,7 +9,7 @@ const bot = new TelegramBot(token, { polling: true });
 
 console.log(token);
 
-// 处理 /start 命令
+// Handle /start command
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
@@ -19,7 +17,7 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// 处理 /help 命令
+// Handle /help command
 bot.onText(/\/help/, (msg) => {
   const helpText = `
 /start - Start the bot
@@ -29,39 +27,45 @@ bot.onText(/\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, helpText);
 });
 
-// 下载并发送 YouTube 视频
+// Download and send YouTube video with progress
 bot.onText(/\/ytb (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   const url = match[1];
 
-  // Check if the URL looks like a YouTube link
   if (!url.includes("youtube.com") && !url.includes("youtu.be")) {
     return bot.sendMessage(chatId, "Please provide a valid YouTube URL.");
   }
 
-  // Inform the user that the download has started
-  bot.sendMessage(chatId, "Downloading your video, please wait...");
+  bot.sendMessage(chatId, "Starting video download...");
 
-  // Download the video using yt-dlp
-  const outputPath = path.join(__dirname, `video-${Date.now()}.mp4`);
-  exec(`yt-dlp -f best -o "${outputPath}" ${url}`, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Error downloading video: ${error.message}`);
-      return bot.sendMessage(chatId, "Failed to download video.");
+  // Spawn yt-dlp process with output to pipe
+  const ytProcess = spawn("yt-dlp", ["-f", "best", "-o", "-", url]);
+
+  // Track progress and send updates
+  ytProcess.stderr.on("data", (data) => {
+    const output = data.toString();
+    const match = output.match(/(\d+\.\d+)%/);
+    if (match) {
+      const progress = match[1];
+      bot.sendMessage(chatId, `Download progress: ${progress}%`);
     }
+  });
 
-    // Send the video file to the user
-    bot.sendVideo(chatId, outputPath).then(() => {
-      // Delete the video file after sending
-      fs.unlinkSync(outputPath);
-    }).catch(err => {
-      console.error(`Error sending video: ${err.message}`);
-      bot.sendMessage(chatId, "Failed to send video.");
-    });
+  // Send video as a stream to Telegram
+  bot.sendVideo(chatId, ytProcess.stdout).catch((err) => {
+    console.error(`Error sending video: ${err.message}`);
+    bot.sendMessage(chatId, "Failed to send video.");
+  });
+
+  ytProcess.on("close", (code) => {
+    if (code !== 0) {
+      console.error(`yt-dlp exited with code ${code}`);
+      bot.sendMessage(chatId, "Failed to download video.");
+    }
   });
 });
 
-// 回复用户发送的普通消息
+// Reply to non-command messages
 bot.on("message", (msg) => {
   if (!msg.text.startsWith("/")) {
     bot.sendMessage(msg.chat.id, msg.text);
