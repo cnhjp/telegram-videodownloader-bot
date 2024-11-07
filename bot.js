@@ -69,21 +69,47 @@ bot.on("message", (msg) => {
     const { url } = userQualitySelections[chatId];
     delete userQualitySelections[chatId];
 
-    // Download video in the chosen format
+    // Start downloading the video in the chosen format
     bot.sendMessage(chatId, `Downloading video in format ${selectedFormatCode}...`);
 
     const ytProcess = spawn("yt-dlp", ["-f", selectedFormatCode, "-o", "-", url]);
 
-    bot.sendVideo(chatId, ytProcess.stdout).catch((err) => {
-      console.error(`Error sending video: ${err.message}`);
-      bot.sendMessage(chatId, "Failed to send video. The file may be too large.");
+    let lastProgressSent = 0;
+
+    // Track download progress from stderr
+    ytProcess.stderr.on("data", (data) => {
+      const output = data.toString();
+
+      // Match the download progress percentage
+      const match = output.match(/(\d+\.\d+)%/);
+      if (match) {
+        const progress = parseFloat(match[1]);
+
+        // Send progress updates at 5% intervals
+        if (progress - lastProgressSent >= 5) {
+          bot.sendMessage(chatId, `Download progress: ${progress.toFixed(0)}%`);
+          lastProgressSent = progress;
+        }
+      }
     });
 
+    // Send the video once the download completes
     ytProcess.on("close", (code) => {
-      if (code !== 0) {
+      if (code === 0) {
+        bot.sendVideo(chatId, ytProcess.stdout).catch((err) => {
+          console.error(`Error sending video: ${err.message}`);
+          bot.sendMessage(chatId, "Failed to send video. The file may be too large.");
+        });
+      } else {
         console.error(`yt-dlp exited with code ${code}`);
         bot.sendMessage(chatId, "Failed to download video.");
       }
+    });
+
+    // Handle any error that occurs in the yt-dlp process
+    ytProcess.on("error", (err) => {
+      console.error(`Error executing yt-dlp: ${err.message}`);
+      bot.sendMessage(chatId, "An error occurred during the download.");
     });
   }
 });
