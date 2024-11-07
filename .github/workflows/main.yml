@@ -43,4 +43,4 @@ jobs:
             docker rm telegram-videodownloader-bot || true && \
             docker image rm cnhjp/telegram-videodownloader-bot || true && \
             docker pull cnhjp/telegram-videodownloader-bot && \
-            docker run -d --name telegram-videodownloader-bot -p 8061:80 cnhjp/telegram-videodownloader-bot
+            docker run -d --name telegram-videodownloader-bot -p 8061:80 cnhjp/telegram-videodownloader-bot"
