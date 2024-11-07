@@ -1,0 +1,46 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main # 监听main分支的推送
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Write secrets to .env
+        run: |
+          echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+
+      - name: Build and Push Docker images
+        run: |
+          # Build and push the frontend image
+          docker build -t cnhjp/telegram-videodownloader-bot:latest -f Dockerfile .
+          docker push cnhjp/telegram-videodownloader-bot:latest
+
+      - name: Deploy to Server
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > id_rsa
+          chmod 600 id_rsa
+          eval "$(ssh-agent -s)"
+          ssh-add id_rsa
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }} root@${{ secrets.SSH_IP }} "
+            docker stop telegram-videodownloader-bot || true && \
+            docker rm telegram-videodownloader-bot || true && \
+            docker image rm cnhjp/telegram-videodownloader-bot || true && \
+            docker pull cnhjp/telegram-videodownloader-bot && \
+            docker run -d --name telegram-videodownloader-bot -p 8061:80 cnhjp/telegram-videodownloader-bot
