@@ -41,13 +41,21 @@ bot.onText(/\/ytb (.+)/, (msg, match) => {
   // Spawn yt-dlp process with output to pipe
   const ytProcess = spawn("yt-dlp", ["-f", "best", "-o", "-", url]);
 
+  let lastProgressSent = 0; // Track the last progress percentage sent
+
   // Track progress and send updates
   ytProcess.stderr.on("data", (data) => {
     const output = data.toString();
     const match = output.match(/(\d+\.\d+)%/);
+
     if (match) {
-      const progress = match[1];
-      bot.sendMessage(chatId, `Download progress: ${progress}%`);
+      const progress = parseFloat(match[1]);
+
+      // Only send a message if progress has increased by 10% or more
+      if (progress - lastProgressSent >= 10) {
+        bot.sendMessage(chatId, `Download progress: ${progress.toFixed(0)}%`);
+        lastProgressSent = progress;
+      }
     }
   });
 
