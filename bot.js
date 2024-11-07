@@ -7,7 +7,7 @@ dotenv.config();
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Track user quality selections
+// Store format options and URL for each user session
 const userQualitySelections = {};
 
 // Enhanced error logging for polling errors
@@ -46,8 +46,8 @@ bot.onText(/\/ytb (.+)/, (msg, match) => {
 
     bot.sendMessage(chatId, formatOptions + "\nReply with the format code to select a quality.");
 
-    // Store formats for the user session
-    userQualitySelections[chatId] = formats.map(format => format.split(" ")[0]); // Store only format codes
+    // Store URL and formats for the user session
+    userQualitySelections[chatId] = { url, formats: formats.map(format => format.split(" ")[0]) };
   });
 });
 
@@ -61,11 +61,12 @@ bot.on("message", (msg) => {
     const selectedFormatCode = text.trim();
 
     // Validate the format code
-    if (!userQualitySelections[chatId].includes(selectedFormatCode)) {
+    if (!userQualitySelections[chatId].formats.includes(selectedFormatCode)) {
       return bot.sendMessage(chatId, "Invalid format code. Please enter a valid code from the list.");
     }
 
-    // Clear the format selection for this chat
+    // Retrieve the URL and clear the format selection for this chat
+    const { url } = userQualitySelections[chatId];
     delete userQualitySelections[chatId];
 
     // Download video in the chosen format
