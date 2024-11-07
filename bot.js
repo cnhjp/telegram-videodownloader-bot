@@ -1,33 +1,13 @@
 const dotenv = require("dotenv");
 const TelegramBot = require("node-telegram-bot-api");
-const { spawn } = require("child_process");
+const { spawn, exec } = require("child_process");
 
 dotenv.config();
 
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-console.log(token);
-
-// Handle /start command
-bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "Hello! I'm your bot. Type /help to see available commands."
-  );
-});
-
-// Handle /help command
-bot.onText(/\/help/, (msg) => {
-  const helpText = `
-/start - Start the bot
-/help - Show available commands
-/ytb <YouTube URL> - Download a YouTube video
-`;
-  bot.sendMessage(msg.chat.id, helpText);
-});
-
-// Download and send YouTube video with progress
+// Handle /ytb command
 bot.onText(/\/ytb (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   const url = match[1];
@@ -36,46 +16,59 @@ bot.onText(/\/ytb (.+)/, (msg, match) => {
     return bot.sendMessage(chatId, "Please provide a valid YouTube URL.");
   }
 
-  bot.sendMessage(chatId, "Starting video download...");
+  bot.sendMessage(chatId, "Checking video size...");
 
-  // Spawn yt-dlp process with output to pipe
-  const ytProcess = spawn("yt-dlp", ["-f", "best", "-o", "-", url]);
+  // Get video info using yt-dlp to check the size
+  exec(`yt-dlp -f best --print-json ${url}`, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Error retrieving video info: ${error.message}`);
+      return bot.sendMessage(chatId, "Failed to retrieve video information.");
+    }
 
-  let lastProgressSent = 0; // Track the last progress percentage sent
+    // Parse the JSON output to get file size
+    const videoInfo = JSON.parse(stdout);
+    const fileSize = videoInfo.filesize || videoInfo.filesize_approx || 0;
 
-  // Track progress and send updates
-  ytProcess.stderr.on("data", (data) => {
-    const output = data.toString();
-    const match = output.match(/(\d+\.\d+)%/);
+    // Convert file size from bytes to MB
+    const fileSizeMB = fileSize / (1024 * 1024);
+    
+    // Check if the file size exceeds the Telegram limit
+    const fileLimit = 50; // 50 MB for standard Telegram users
+    if (fileSizeMB > fileLimit) {
+      return bot.sendMessage(chatId, `The video is too large (${fileSizeMB.toFixed(2)} MB). Try a shorter video or use a lower quality.`);
+    }
 
-    if (match) {
-      const progress = parseFloat(match[1]);
+    bot.sendMessage(chatId, "Starting video download...");
 
-      // Only send a message if progress has increased by 10% or more
-      if (progress - lastProgressSent >= 10) {
-        bot.sendMessage(chatId, `Download progress: ${progress.toFixed(0)}%`);
-        lastProgressSent = progress;
+    // Spawn yt-dlp process with output to pipe
+    const ytProcess = spawn("yt-dlp", ["-f", "best", "-o", "-", url]);
+
+    let lastProgressSent = 0;
+
+    // Track download progress
+    ytProcess.stderr.on("data", (data) => {
+      const output = data.toString();
+      const match = output.match(/(\d+\.\d+)%/);
+      if (match) {
+        const progress = parseFloat(match[1]);
+        if (progress - lastProgressSent >= 10) {
+          bot.sendMessage(chatId, `Download progress: ${progress.toFixed(0)}%`);
+          lastProgressSent = progress;
+        }
       }
-    }
-  });
+    });
 
-  // Send video as a stream to Telegram
-  bot.sendVideo(chatId, ytProcess.stdout).catch((err) => {
-    console.error(`Error sending video: ${err.message}`);
-    bot.sendMessage(chatId, "Failed to send video.");
-  });
+    // Send video as a stream
+    bot.sendVideo(chatId, ytProcess.stdout).catch((err) => {
+      console.error(`Error sending video: ${err.message}`);
+      bot.sendMessage(chatId, "Failed to send video. The file may be too large.");
+    });
 
-  ytProcess.on("close", (code) => {
-    if (code !== 0) {
-      console.error(`yt-dlp exited with code ${code}`);
-      bot.sendMessage(chatId, "Failed to download video.");
-    }
+    ytProcess.on("close", (code) => {
+      if (code !== 0) {
+        console.error(`yt-dlp exited with code ${code}`);
+        bot.sendMessage(chatId, "Failed to download video.");
+      }
+    });
   });
-});
-
-// Reply to non-command messages
-bot.on("message", (msg) => {
-  if (!msg.text.startsWith("/")) {
-    bot.sendMessage(msg.chat.id, msg.text);
-  }
 });
