@@ -7,9 +7,15 @@ dotenv.config();
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Map to store quality selection for each user
+// Track user quality selections
 const userQualitySelections = {};
 
+// Enhanced error logging for polling errors
+bot.on("polling_error", (error) => {
+  console.error(`[polling_error] ${error.message}`);
+});
+
+// Handle /ytb command to fetch formats
 bot.onText(/\/ytb (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   const url = match[1];
@@ -20,55 +26,53 @@ bot.onText(/\/ytb (.+)/, (msg, match) => {
 
   bot.sendMessage(chatId, "Fetching available video qualities...");
 
-  // Get available video formats with yt-dlp
+  // Execute yt-dlp to get available formats
   exec(`yt-dlp -F ${url}`, (error, stdout, stderr) => {
     if (error) {
       console.error(`Error retrieving formats: ${error.message}`);
       return bot.sendMessage(chatId, "Failed to retrieve video formats.");
     }
 
-    // Send the available formats to the user
+    // Parse available formats
     const formats = stdout.match(/(\d+)\s+\S+\s+(\d+x\d+|\d+p)\s+.+/g);
     if (!formats) {
       return bot.sendMessage(chatId, "No formats found for this video.");
     }
 
     let formatOptions = "Available video qualities:\n";
-    formats.forEach((format, index) => {
+    formats.forEach((format) => {
       formatOptions += `${format}\n`;
     });
 
     bot.sendMessage(chatId, formatOptions + "\nReply with the format code to select a quality.");
 
-    // Store available formats for the user session
-    userQualitySelections[chatId] = formats;
+    // Store formats for the user session
+    userQualitySelections[chatId] = formats.map(format => format.split(" ")[0]); // Store only format codes
   });
 });
 
-// Listen for user reply with format code
+// Handle user reply for format code selection
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  // Check if the user has format options available
+  // Ensure this chat has a format selection active
   if (userQualitySelections[chatId]) {
-    const selectedFormat = text.trim();
+    const selectedFormatCode = text.trim();
 
-    // Check if the user’s response matches one of the format codes
-    const selectedOption = userQualitySelections[chatId].find(format => format.startsWith(selectedFormat));
-    if (!selectedOption) {
+    // Validate the format code
+    if (!userQualitySelections[chatId].includes(selectedFormatCode)) {
       return bot.sendMessage(chatId, "Invalid format code. Please enter a valid code from the list.");
     }
 
-    // Clear selection after choosing format to avoid re-processing
+    // Clear the format selection for this chat
     delete userQualitySelections[chatId];
 
-    // Start the download in the chosen format
-    bot.sendMessage(chatId, `Downloading video in format ${selectedFormat}...`);
+    // Download video in the chosen format
+    bot.sendMessage(chatId, `Downloading video in format ${selectedFormatCode}...`);
 
-    const ytProcess = spawn("yt-dlp", ["-f", selectedFormat, "-o", "-", url]);
+    const ytProcess = spawn("yt-dlp", ["-f", selectedFormatCode, "-o", "-", url]);
 
-    // Stream video directly to Telegram
     bot.sendVideo(chatId, ytProcess.stdout).catch((err) => {
       console.error(`Error sending video: ${err.message}`);
       bot.sendMessage(chatId, "Failed to send video. The file may be too large.");
